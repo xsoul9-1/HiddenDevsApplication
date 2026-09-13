@@ -1,0 +1,978 @@
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+
+local PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V45")
+
+local AddClick = ReplicatedStorage.Events:WaitForChild("AddClick")
+local BuySkinEvent = ReplicatedStorage.Events:WaitForChild("BuySkin")
+local EquipSkinEvent = ReplicatedStorage.Events:WaitForChild("EquipSkinEvent")
+local GetSkinData = ReplicatedStorage.Events:WaitForChild("GetSkinData")
+
+local BuyUpgradeEvent = ReplicatedStorage.Events:WaitForChild("BuyUpgrade")
+local GetUpgradeData = ReplicatedStorage.Events:WaitForChild("GetUpgradeData")
+local AutoClick = ReplicatedStorage.Events:WaitForChild("AutoClick")
+local AddBaguette = ReplicatedStorage.Events:WaitForChild("AddBaguette")
+local RebirthEvent = ReplicatedStorage.Events:WaitForChild("RebirthEvent")
+local SkinEvent = game.ReplicatedStorage.Events:WaitForChild("GiveSkin")
+local OfflineEarningsEvent = ReplicatedStorage.Events:WaitForChild("OfflineEarnings")
+local SecretAddSkin = game.ReplicatedStorage.Events:WaitForChild("SecretAddSkin")
+
+local playerSkins = {}
+local currentSkins = {}
+local playerUpgrades = {}
+
+local dataLoaded = {}
+local pendingOfflineEarnings = {}
+local saving = {}
+
+local DEFAULT_SKIN = "Default"
+
+-- LOAD DATA
+
+local function loadData(player)
+
+	local success, data = pcall(function()
+		return PlayerDataStore:GetAsync(player.UserId)
+	end)
+
+	if not success then
+		warn("FAILED TO LOAD DATA FOR " .. player.Name)
+		player:Kick("Your data could not be loaded. Please rejoin.")
+		return
+	end
+
+	-- NEW PLAYER
+
+	if data == nil then
+
+		data = {
+			Rebirths = 0,
+			RebirthBoost = 1,
+			RebirthPrice = 500000, 
+			Baguettes = -1,
+			Clicks = 0,
+			PlayerClick = 1,
+			AutoClicks = 0,
+			AutoTetoSpeed = 1,
+			AutoClicksPower = 1,
+			Skins = {},
+			CurrentSkin = DEFAULT_SKIN,
+			Upgrades = {},
+			OfflineTeto = false,
+			LastLogout = 0,
+			PendingOfflineEarnings = 0, 
+		}
+
+	end
+
+	-- FIELDS EXIST
+	
+	data.OfflineTeto = data.OfflineTeto or false
+	data.LastLogout = data.LastLogout or 0
+	data.Baguettes = data.Baguettes or -1
+	data.RebirthPrice = data.RebirthPrice or 500000
+	data.RebirthBoost = data.RebirthBoost or 1
+	data.Rebirths = data.Rebirths or 0
+	data.AutoTetoSpeed = data.AutoTetoSpeed or 1
+	data.AutoClicks = data.AutoClicks or 0
+	data.AutoClicksPower = data.AutoClicksPower or 1
+	data.Clicks = data.Clicks or 0
+	data.PlayerClick = data.PlayerClick or 1
+	data.Skins = data.Skins or {}
+	data.CurrentSkin = data.CurrentSkin or DEFAULT_SKIN
+	data.PendingOfflineEarnings = data.PendingOfflineEarnings or 0
+	data.Upgrades = data.Upgrades or {}
+	
+	for _, upgradeData in ipairs(data.Upgrades) do
+
+		upgradeData.Level =
+			math.round(upgradeData.Level or 1)
+
+		upgradeData.Price =
+			math.round(upgradeData.Price or 0)
+
+	end
+
+	-- LOAD PLAYER VALUES
+	
+	player:SetAttribute("AutoTetoSpeed", data.AutoTetoSpeed)
+	player:SetAttribute("RebirthBoost", data.RebirthBoost)
+	player:SetAttribute("Rebirths", data.Rebirths)
+	player:SetAttribute("RebirthPrice", data.RebirthPrice)
+	player:SetAttribute("Baguettes", data.Baguettes)
+	player:SetAttribute("Clicks", data.Clicks)
+	player:SetAttribute("PlayerClick", data.PlayerClick)
+	player:SetAttribute("AutoClicks", data.AutoClicks)
+	player:SetAttribute("AutoClicksPower", data.AutoClicksPower)
+	player:SetAttribute("OfflineTeto", data.OfflineTeto)
+	player:SetAttribute("LastLogout", data.LastLogout)
+	player:SetAttribute("Multiplier", 1)
+	player:SetAttribute("CurrentSkin", data.CurrentSkin or DEFAULT_SKIN)
+	playerSkins[player] = data.Skins
+	currentSkins[player] = data.CurrentSkin
+	playerUpgrades[player] = data.Upgrades
+	data.PendingOfflineEarnings = data.PendingOfflineEarnings
+	dataLoaded[player] = true
+	
+	-- OFFLINE EARNINGS LOADING
+
+	local lastLogout = data.LastLogout or 0
+	local offlineTeto = data.OfflineTeto or false
+	local previousPending = data.PendingOfflineEarnings or 0
+	local newOfflineEarnings = 0
+	local offlineTime = 0
+	if offlineTeto and lastLogout > 0 then
+		offlineTime = os.time() - lastLogout
+		local minimumOfflineTime = 10 * 60
+		if offlineTime >= minimumOfflineTime then
+			local autoClicks = data.AutoClicks or 0
+			local autoPower = data.AutoClicksPower or 1
+			local autoSpeed = data.AutoTetoSpeed or 1
+			local rebirthBoost = data.RebirthBoost or 1
+			local earningsPerSecond =
+				(autoClicks * autoPower * rebirthBoost)
+				/ autoSpeed
+			newOfflineEarnings =
+				math.floor(earningsPerSecond * offlineTime)
+		end
+	end
+	local totalPending =
+		previousPending + newOfflineEarnings
+	if totalPending > 0 then
+		pendingOfflineEarnings[player] = {
+			Amount = totalPending,
+			Time = offlineTime
+		}
+		OfflineEarningsEvent:FireClient(
+			player,
+			totalPending,
+			offlineTime
+		)
+		print(
+			"OFFLINE TETO WAITING:",
+			player.Name,
+			"Previous:", previousPending,
+			"New:", newOfflineEarnings,
+			"Total:", totalPending
+		)
+	else
+		pendingOfflineEarnings[player] = nil
+	end
+	print(
+		"LOADED:",
+		player.Name,
+		"Rebirths:", data.Rebirths,
+		"RebirthBoost:", data.RebirthBoost,
+		"RebirthPrice:", data.RebirthPrice,
+		"AutoTetoSpeed:", data.AutoTetoSpeed,
+		"Baguettes:", data.Baguettes,
+		"Clicks:", data.Clicks,
+		"AutoClicksPower:", data.AutoClicksPower,
+		"AutoClicks:", data.AutoClicks,
+		"PlayerClick:", data.PlayerClick,
+		"CurrentSkin:", data.CurrentSkin,
+		"LastLog", data.LastLogout,
+		"OfflineTeto:", data.OfflineTeto,
+		"pendingOfflineEarnings", data.PendingOfflineEarnings
+		
+		
+		
+	)
+
+	for _, upgrade in ipairs(data.Upgrades) do
+
+		print(
+			"  Upgrade:",
+			upgrade.Name,
+			"Level:", upgrade.Level,
+			"Price:", upgrade.Price
+		)
+	end
+end
+
+-- SAVE DATA
+
+local function saveData(player)
+
+	if saving[player] then
+		return
+	end
+
+	saving[player] = true
+
+	local data = {
+		
+		AutoTetoSpeed = player:GetAttribute("AutoTetoSpeed") or 1,
+		RebirthBoost = player:GetAttribute("RebirthBoost") or 1,
+		Rebirths = player:GetAttribute("Rebirths") or 0,
+		RebirthPrice = player:GetAttribute("RebirthPrice") or 500000,
+		Clicks = player:GetAttribute("Clicks") or 0,
+		PlayerClick = player:GetAttribute("PlayerClick") or 1,
+		AutoClicks = player:GetAttribute("AutoClicks") or 0,
+		Baguettes = player:GetAttribute("Baguettes") or -1,
+		AutoClicksPower = player:GetAttribute("AutoClicksPower") or 1,
+		OfflineTeto = player:GetAttribute("OfflineTeto") or false,
+		PendingOfflineEarnings = pendingOfflineEarnings[player] or nil,
+		CurrentSkin = player:GetAttribute("CurrentSkin") or DEFAULT_SKIN,
+		LastLogout = os.time(),
+		
+		Skins = playerSkins[player] or {},
+		Upgrades = playerUpgrades[player] or {}
+
+	}
+	local success, err = pcall(function()
+
+		PlayerDataStore:UpdateAsync(player.UserId, function()
+			return data
+		end)
+	end)
+	if success then
+		print(
+			"SAVED:",
+			player.Name,
+			"Rebirths:", data.Rebirths,
+			"RebirthBoost:", data.RebirthBoost,
+			"AutoTetoSpeed:", data.AutoTetoSpeed,
+			"RebirthPrice:", data.RebirthPrice,
+			"Baguettes:", data.Baguettes,
+			"AutoClicksPower:", data.AutoClicksPower,
+			"AutoClicks:", data.AutoClicks,
+			"Clicks:", data.Clicks,
+			"PlayerClick:", data.PlayerClick,
+			"CurrentSkin:", data.CurrentSkin,
+			"LastLog", data.LastLogout,
+			"OfflineTeto:", data.OfflineTeto,
+			"pendingOfflineEarnings", data.PendingOfflineEarnings
+		)
+		for _, upgrade in ipairs(data.Upgrades) do
+
+			print(
+				"  Upgrade:",
+				upgrade.Name,
+				"Level:", upgrade.Level,
+				"Price:", upgrade.Price
+			)
+		end
+	else
+
+		warn(
+			"FAILED TO SAVE "
+				.. player.Name
+				.. ": "
+				.. tostring(err)
+		)
+
+	end
+	saving[player] = nil
+end
+
+-- PLAYER JOIN
+
+Players.PlayerAdded:Connect(function(player)
+
+	loadData(player)
+
+end)
+
+-- PLAYER LEAVE
+
+Players.PlayerRemoving:Connect(function(player)
+
+	if dataLoaded[player] then
+		saveData(player)
+	end
+	playerSkins[player] = nil
+	currentSkins[player] = nil
+	playerUpgrades[player] = nil
+	dataLoaded[player] = nil
+
+end)
+
+-- SERVER SHUTDOWN
+
+game:BindToClose(function()
+
+	for _, player in Players:GetPlayers() do
+
+		if dataLoaded[player] then
+			saveData(player)
+		end
+	end
+end)
+
+-- ADD CLICK
+
+AddClick.OnServerEvent:Connect(function(player)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local clicks = player:GetAttribute("Clicks") or 0
+	local playerClick = player:GetAttribute("PlayerClick") or 1
+	local rebirthboost = player:GetAttribute("RebirthBoost") or 1
+	local playerskin = player:GetAttribute("CurrentSkin") or "Default"
+	local skinmultiplier = ReplicatedStorage:FindFirstChild("Skins"):FindFirstChild(playerskin).Multiplier.Value
+	local multiplier = player:GetAttribute("Multiplier") or 1
+	local togive = playerClick * rebirthboost * multiplier * skinmultiplier
+	player:SetAttribute(
+		"Clicks",
+		clicks + togive
+	)
+end)
+
+AutoClick.OnServerEvent:Connect(function(player)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local clicks = player:GetAttribute("Clicks") or 0
+	local autoClicks = player:GetAttribute("AutoClicks") or 0
+	local rebirthboost = player:GetAttribute("RebirthBoost") or 1
+	local multiplier = player:GetAttribute("Multiplier") or 1
+	local playerskin = player:GetAttribute("CurrentSkin") or "Default"
+	local skinmultiplier = ReplicatedStorage:FindFirstChild("Skins"):FindFirstChild(playerskin).Multiplier.Value
+	local multiplier = player:GetAttribute("Multiplier") or 1
+
+	if autoClicks <= 0 then
+		return
+	end
+	local togive = autoClicks * rebirthboost * multiplier * skinmultiplier
+	player:SetAttribute(
+		"Clicks",
+		clicks + togive
+	)
+end)
+AddBaguette.OnServerEvent:Connect(function(player)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local baguettes = player:GetAttribute("Baguettes")
+
+	if baguettes == nil or baguettes < 0 then
+		return
+	end
+
+	player:SetAttribute("Baguettes", baguettes + 1)
+
+end)
+
+-- BUY SKIN
+
+BuySkinEvent.OnServerEvent:Connect(function(player, clientPrice, skinName)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local clicks = player:GetAttribute("Clicks") or 0
+	local skins = playerSkins[player]
+
+	if not skins then
+		return
+	end
+
+	local skin = ReplicatedStorage.Skins:FindFirstChild(skinName)
+
+	if not skin then
+		return
+	end
+
+	if table.find(skins, skinName) then
+		return
+	end
+
+	local priceValue = skin:FindFirstChild("Price")
+
+	if not priceValue then
+		warn("No Price found for skin:", skinName)
+		return
+	end
+
+	local price = priceValue.Value
+
+	if clientPrice ~= price then
+		warn(
+			player.Name
+				.. " sent an invalid price for "
+				.. skinName
+		)
+		return
+	end
+
+	if clicks < price then
+		return
+	end
+
+	player:SetAttribute(
+		"Clicks",
+		clicks - price
+	)
+
+	table.insert(skins, skinName)
+
+	currentSkins[player] = skinName
+	player:SetAttribute("CurrentSkin", skinName)
+
+	BuySkinEvent:FireClient(
+		player,
+		skinName
+	)
+end)
+
+SkinEvent.OnServerEvent:Connect(function(player, clientPrice, skinName)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local clicks = player:GetAttribute("Clicks") or 0
+	local skins = playerSkins[player]
+
+	if not skins then
+		return
+	end
+	local skin = ReplicatedStorage.RandomSkins:FindFirstChild(skinName)
+
+	if not skin then
+		warn("Skin not found:", skinName)
+		return
+	end
+	local alreadyOwned = table.find(skins, skinName) ~= nil
+
+	local priceValue = skin:FindFirstChild("Price")
+
+	if not priceValue then
+		warn("No Price found for skin:", skinName)
+		return
+	end
+	local price = priceValue.Value
+	if clientPrice ~= price then
+		warn(
+			player.Name
+				.. " sent an invalid price for "
+				.. skinName
+		)
+		return
+	end
+	if clicks < price then
+		return
+	end
+	player:SetAttribute(
+		"Clicks",
+		clicks - price
+	)
+	if not alreadyOwned then
+		table.insert(skins, skinName)
+	end
+
+	currentSkins[player] = skinName
+	player:SetAttribute("CurrentSkin", skinName)
+	BuySkinEvent:FireClient(
+		player,
+		skinName
+	)
+end)
+
+SecretAddSkin.OnServerEvent:Connect(function(player, skinName)
+	if not dataLoaded[player] then
+		return
+	end
+
+	local skins = playerSkins[player]
+
+	if not skins then
+		return
+	end
+
+	local skin = ReplicatedStorage.RandomSkins:FindFirstChild(skinName)
+
+	if not skin then
+		warn("Skin not found:", skinName)
+		return
+	end
+
+	if table.find(skins, skinName) then
+		return
+	end
+
+	table.insert(skins, skinName)
+end)
+
+
+-- EQUIP SKIN
+
+EquipSkinEvent.OnServerEvent:Connect(function(player, skinName)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local skins = playerSkins[player]
+
+	if not skins then
+		return
+	end
+
+	if not ReplicatedStorage.Skins:FindFirstChild(skinName) then
+		return
+	end
+
+	if not table.find(skins, skinName) then
+		table.insert(skins, skinName)
+	end
+
+	currentSkins[player] = skinName
+	player:SetAttribute("CurrentSkin", skinName)
+
+	print(
+		player.Name
+			.. " equipped "
+			.. skinName
+	)
+end)
+
+
+-- GET SKIN DATA
+
+
+GetSkinData.OnServerInvoke = function(player)
+
+	while not dataLoaded[player] do
+		task.wait()
+	end
+
+	return
+		playerSkins[player] or {},
+		currentSkins[player] or DEFAULT_SKIN
+end
+
+-- GET UPGRADE DATA
+
+GetUpgradeData.OnServerInvoke = function(player)
+
+	while not dataLoaded[player] do
+		task.wait()
+	end
+	return playerUpgrades[player] or {}
+end
+
+
+-- BUY UPGRADE
+
+BuyUpgradeEvent.OnServerEvent:Connect(function(
+	player,
+	upgradeName,
+	clientPrice,
+	clientMaxLevel
+)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local upgrades = playerUpgrades[player]
+
+	if not upgrades then
+		return
+	end
+
+	local savedUpgrade
+
+	for _, upgradeData in ipairs(upgrades) do
+		if upgradeData.Name == upgradeName then
+			savedUpgrade = upgradeData
+			break
+		end
+	end
+
+	if not savedUpgrade then
+		if typeof(clientPrice) ~= "number"
+			or typeof(clientMaxLevel) ~= "number" then
+			return
+		end
+
+		savedUpgrade = {
+			Name = upgradeName,
+			Level = 0,
+			MaxLevel = math.round(clientMaxLevel),
+			Price = math.round(clientPrice)
+		}
+
+		table.insert(upgrades, savedUpgrade)
+	end
+
+	if savedUpgrade.Level >= savedUpgrade.MaxLevel then
+		return
+	end
+
+	local price = savedUpgrade.Price
+	local clicks = player:GetAttribute("Clicks") or 0
+
+	if clicks < price then
+		return
+	end
+
+	player:SetAttribute("Clicks", clicks - price)
+
+	savedUpgrade.Level += 1
+	savedUpgrade.Price = math.round(price * 1.3)
+
+	if upgradeName == "+1 Teto" then
+
+		local playerClick = player:GetAttribute("PlayerClick") or 1
+
+		player:SetAttribute(
+			"PlayerClick",
+			playerClick + 1
+		)
+	elseif upgradeName == "+10 Teto" then
+
+		local playerClick = player:GetAttribute("PlayerClick") or 1
+
+		player:SetAttribute(
+			"PlayerClick",
+			playerClick + 10
+		)
+
+	elseif upgradeName == "Auto Teto" then
+		local autoClicks = player:GetAttribute("AutoClicks") or 0
+		player:SetAttribute(
+			"AutoClicks",
+			autoClicks + 1
+		)
+	elseif upgradeName == "+10 Auto Teto" then
+		local autoClicks = player:GetAttribute("AutoClicks") or 0
+		player:SetAttribute(
+			"AutoClicks",
+			autoClicks + 10
+		)
+	elseif upgradeName == "Auto Teto Power" then
+		local autoClicksPower =
+			player:GetAttribute("AutoClicksPower") or 1
+		player:SetAttribute(
+			"AutoClicksPower",
+			autoClicksPower + 1
+		)
+	elseif upgradeName == "Auto Teto Speed" then
+		local AutoTetoSpeed =
+			player:GetAttribute("AutoTetoSpeed") or 1
+		player:SetAttribute(
+			"AutoTetoSpeed",
+			AutoTetoSpeed - 0.05
+		)
+	elseif upgradeName == "Unlock Baguettes" then
+		local Baguettes = player:GetAttribute("Baguettes") or 1
+		player:SetAttribute(
+			"Baguettes",
+			Baguettes + 1
+		)
+	elseif upgradeName == "Unlock Offline Teto" then
+		player:SetAttribute(
+			"OfflineTeto",
+			true
+		)
+	end
+	task.spawn(function()
+		saveData(player)
+	end)
+
+	BuyUpgradeEvent:FireClient(
+		player,
+		upgradeName,
+		savedUpgrade.Price,
+		savedUpgrade.Level
+	)
+
+	print(
+		"BOUGHT UPGRADE:",
+		player.Name,
+		upgradeName,
+		"Level:", savedUpgrade.Level,
+		"MaxLevel:", savedUpgrade.MaxLevel,
+		"Price:", savedUpgrade.Price
+	)
+end)
+
+RebirthEvent.OnServerEvent:Connect(function(player)
+	if not dataLoaded[player] then
+		return
+	end
+	local upgradesGui =
+		player.PlayerGui.Main:FindFirstChild("Upgrades", true)
+
+	local scrollingFrame =
+		upgradesGui
+		and upgradesGui:FindFirstChild("ScrollingFrame")
+
+	local clicks =
+		player:GetAttribute("Clicks") or 0
+
+	local rebirthPrice =
+		player:GetAttribute("RebirthPrice") or 500000
+	if clicks < rebirthPrice then
+		return
+	end
+
+	local oldClicks = clicks
+
+	local clickReward =
+		math.round(oldClicks * 0.2)
+
+	local newRebirthPrice =
+		math.floor(rebirthPrice * 1.3)
+
+	player:SetAttribute("Clicks",clickReward)
+	player:SetAttribute("PlayerClick",1)
+	player:SetAttribute("AutoClicks",0)
+	player:SetAttribute("AutoClicksPower",1)
+	player:SetAttribute("AutoTetoSpeed",1)
+	player:SetAttribute("Rebirths",(player:GetAttribute("Rebirths") or 0) + 1)
+	player:SetAttribute("RebirthBoost",(player:GetAttribute("RebirthBoost") or 1) * 1.5)
+	player:SetAttribute("RebirthPrice",newRebirthPrice)
+	local permanentUpgrades = {
+		["Unlock Baguettes"] = true,
+		["Unlock Offline Teto"] = true
+	}
+
+	local preservedUpgrades = {}
+	for _, upgradeData in ipairs(playerUpgrades[player] or {}) do
+
+		if permanentUpgrades[upgradeData.Name]
+			and upgradeData.Level >= 1 then
+
+			table.insert(
+				preservedUpgrades,
+				{
+					Name = upgradeData.Name,
+					Level = upgradeData.Level,
+					MaxLevel = upgradeData.MaxLevel,
+					Price = upgradeData.Price
+				}
+			)
+
+		end
+	end
+	if scrollingFrame then
+
+		for _, upgradeFrame in ipairs(scrollingFrame:GetChildren()) do
+
+			local lvlValue =
+				upgradeFrame:FindFirstChild("LvL")
+
+			local priceValue =
+				upgradeFrame:FindFirstChild("Price")
+
+			local basePrice =
+				upgradeFrame:FindFirstChild("BasePrice")
+
+			if lvlValue then
+				lvlValue.Value = 0
+			end
+
+			if priceValue and basePrice then
+				priceValue.Value = basePrice.Value
+			end
+		end
+		for _, upgradeData in ipairs(preservedUpgrades) do
+
+			local upgrade =
+				scrollingFrame:FindFirstChild(
+					upgradeData.Name,
+					true
+				)
+
+			if upgrade then
+
+				local lvlValue =
+					upgrade:FindFirstChild("LvL")
+
+				local priceValue =
+					upgrade:FindFirstChild("Price")
+
+				if lvlValue then
+					lvlValue.Value =
+						upgradeData.Level
+				end
+
+				if priceValue then
+					priceValue.Value =
+						upgradeData.Price
+				end
+			end
+		end
+	end
+
+	playerUpgrades[player] = preservedUpgrades
+	saveData(player)
+
+	RebirthEvent:FireClient(player, {
+		RebirthPrice = newRebirthPrice,
+		ResetUpgrades = true
+	})
+
+	print(
+		"REBIRTH:",
+		player.Name,
+		"| Old Clicks:",
+		oldClicks,
+		"| Reward:",
+		clickReward,
+		"| New Price:",
+		newRebirthPrice,
+		"| Rebirths:",
+		player:GetAttribute("Rebirths"),
+		"| Boost:",
+		player:GetAttribute("RebirthBoost")
+	)
+
+	for _, upgradeData in
+		ipairs(preservedUpgrades) do
+
+		print(
+			"KEPT UPGRADE:",
+			upgradeData.Name,
+			"Level:",
+			upgradeData.Level
+		)
+	end
+end)
+-- RESET DATA COMMAND
+local ADMINS = {
+	[2768492361] = true, 
+}
+
+local function resetPlayerData(targetPlayer)
+	if not targetPlayer then
+		return false
+	end
+
+	local success, err = pcall(function()
+		PlayerDataStore:RemoveAsync(targetPlayer.UserId)
+	end)
+
+	if not success then
+		warn("FAILED TO RESET DATA FOR " .. targetPlayer.Name .. ": " .. tostring(err))
+		return false
+	end
+
+	targetPlayer:SetAttribute("AutoTetoSpeed", 1)
+	targetPlayer:SetAttribute("RebirthBoost", 1)
+	targetPlayer:SetAttribute("Rebirths", 0)
+	targetPlayer:SetAttribute("RebirthPrice", 500000)
+	targetPlayer:SetAttribute("Baguettes", -1)
+	targetPlayer:SetAttribute("Clicks", 0)
+	targetPlayer:SetAttribute("PlayerClick", 1)
+	targetPlayer:SetAttribute("AutoClicks", 0)
+	targetPlayer:SetAttribute("AutoClicksPower", 1)
+	targetPlayer:SetAttribute("CurrentSkin", DEFAULT_SKIN)
+	playerSkins[targetPlayer] = {}
+	currentSkins[targetPlayer] = DEFAULT_SKIN
+	playerUpgrades[targetPlayer] = {}
+
+	print("RESET DATA:", targetPlayer.Name)
+
+	return true
+end
+
+
+-- Detect teleport failures
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+	if player.Parent then
+		player:Kick("Your data was reset, but the server transfer failed. Please rejoin.")
+	end
+end)
+
+
+Players.PlayerAdded:Connect(function(player)
+	player.Chatted:Connect(function(message)
+		if not ADMINS[player.UserId] then
+			return
+		end
+
+		local args = string.split(message, " ")
+		if string.lower(args[1]) ~= "!reset" then
+			return
+		end
+		local username = args[2]
+		local targetPlayer = player
+		if username then
+			for _, otherPlayer in ipairs(Players:GetPlayers()) do
+				if string.lower(otherPlayer.Name) == string.lower(username) then
+					targetPlayer = otherPlayer
+					break
+				end
+			end
+			if targetPlayer == player and string.lower(username) ~= string.lower(player.Name) then
+				warn("Player not found: " .. username)
+				return
+			end
+		end
+		if resetPlayerData(targetPlayer) then
+			print(
+				player.Name
+					.. " reset the data of "
+					.. targetPlayer.Name
+			)
+			local success, err = pcall(function()
+				TeleportService:Teleport(
+					game.PlaceId,
+					targetPlayer
+				)
+			end)
+			if not success then
+				if targetPlayer.Parent then
+					targetPlayer:Kick(
+						"Your data was reset, but the server transfer failed. Please rejoin."
+					)
+				end
+			end
+		end
+	end)
+end)
+
+--OfflineEarnings
+OfflineEarningsEvent.OnServerEvent:Connect(function(player)
+
+	if not dataLoaded[player] then
+		return
+	end
+
+	local pending = pendingOfflineEarnings[player]
+
+	if not pending then
+		return
+	end
+
+	local amount = pending.Amount
+
+	if typeof(amount) ~= "number" or amount <= 0 then
+		pendingOfflineEarnings[player] = nil
+		return
+	end
+
+	local clicks = player:GetAttribute("Clicks") or 0
+
+	player:SetAttribute(
+		"Clicks",
+		clicks + amount
+	)
+
+	pendingOfflineEarnings[player] = nil
+
+	print(
+		"OFFLINE TETO CLAIMED:",
+		player.Name,
+		"Earnings:", amount
+	)
+
+	task.spawn(function()
+		saveData(player)
+	end)
+
+end)
