@@ -12,7 +12,7 @@ local AddClick = ReplicatedStorage.Events:WaitForChild("AddClick")
 local BuySkinEvent = ReplicatedStorage.Events:WaitForChild("BuySkin")
 local EquipSkinEvent = ReplicatedStorage.Events:WaitForChild("EquipSkinEvent")
 local GetSkinData = ReplicatedStorage.Events:WaitForChild("GetSkinData")
-
+--Define Remote Events
 local BuyUpgradeEvent = ReplicatedStorage.Events:WaitForChild("BuyUpgrade")
 local GetUpgradeData = ReplicatedStorage.Events:WaitForChild("GetUpgradeData")
 local AutoClick = ReplicatedStorage.Events:WaitForChild("AutoClick")
@@ -22,6 +22,8 @@ local SkinEvent = game.ReplicatedStorage.Events:WaitForChild("GiveSkin")
 local OfflineEarningsEvent = ReplicatedStorage.Events:WaitForChild("OfflineEarnings")
 local SecretAddSkin = game.ReplicatedStorage.Events:WaitForChild("SecretAddSkin")
 
+
+--Players Strings Data
 local playerSkins = {}
 local currentSkins = {}
 local playerUpgrades = {}
@@ -29,11 +31,11 @@ local playerUpgrades = {}
 local dataLoaded = {}
 local pendingOfflineEarnings = {}
 local saving = {}
-
+--Default Skin
 local DEFAULT_SKIN = "Default"
 
 -- LOAD DATA
-
+--loading of the data, if new player then  set everything to a base value
 local function loadData(player)
 
 	local success, data = pcall(function()
@@ -71,7 +73,7 @@ local function loadData(player)
 	end
 
 	-- FIELDS EXIST
-	
+	--verify that the values exists
 	data.OfflineTeto = data.OfflineTeto or false
 	data.LastLogout = data.LastLogout or 0
 	data.Baguettes = data.Baguettes or -1
@@ -99,7 +101,7 @@ local function loadData(player)
 	end
 
 	-- LOAD PLAYER VALUES
-	
+	--load the values
 	player:SetAttribute("AutoTetoSpeed", data.AutoTetoSpeed)
 	player:SetAttribute("RebirthBoost", data.RebirthBoost)
 	player:SetAttribute("Rebirths", data.Rebirths)
@@ -120,7 +122,7 @@ local function loadData(player)
 	dataLoaded[player] = true
 	
 	-- OFFLINE EARNINGS LOADING
-
+	--calculate the offline earnings once the data is definied
 	local lastLogout = data.LastLogout or 0
 	local offlineTeto = data.OfflineTeto or false
 	local previousPending = data.PendingOfflineEarnings or 0
@@ -196,7 +198,7 @@ local function loadData(player)
 end
 
 -- SAVE DATA
-
+--save the player data when leaving
 local function saveData(player)
 
 	if saving[player] then
@@ -272,7 +274,7 @@ local function saveData(player)
 end
 
 -- PLAYER JOIN
-
+--load player data as soon as he join
 Players.PlayerAdded:Connect(function(player)
 
 	loadData(player)
@@ -280,7 +282,7 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 -- PLAYER LEAVE
-
+--save the player data
 Players.PlayerRemoving:Connect(function(player)
 
 	if dataLoaded[player] then
@@ -294,7 +296,7 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- SERVER SHUTDOWN
-
+-- in case of shutdown save the data
 game:BindToClose(function()
 
 	for _, player in Players:GetPlayers() do
@@ -306,7 +308,7 @@ game:BindToClose(function()
 end)
 
 -- ADD CLICK
-
+--add click each AddClick event which is connected to an ImageButton
 AddClick.OnServerEvent:Connect(function(player)
 
 	if not dataLoaded[player] then
@@ -325,7 +327,7 @@ AddClick.OnServerEvent:Connect(function(player)
 		clicks + togive
 	)
 end)
-
+--once autoclick is unlocked this makes the imagebutton generate clicks every seconds
 AutoClick.OnServerEvent:Connect(function(player)
 
 	if not dataLoaded[player] then
@@ -349,8 +351,9 @@ AutoClick.OnServerEvent:Connect(function(player)
 		clicks + togive
 	)
 end)
+--add a baguette when the player chatch them
 AddBaguette.OnServerEvent:Connect(function(player)
-
+	
 	if not dataLoaded[player] then
 		return
 	end
@@ -366,7 +369,7 @@ AddBaguette.OnServerEvent:Connect(function(player)
 end)
 
 -- BUY SKIN
-
+--buying a skin from the shop
 BuySkinEvent.OnServerEvent:Connect(function(player, clientPrice, skinName)
 
 	if not dataLoaded[player] then
@@ -427,7 +430,7 @@ BuySkinEvent.OnServerEvent:Connect(function(player, clientPrice, skinName)
 		skinName
 	)
 end)
-
+--receiving a skin from the rebirth or a random skin blind box
 SkinEvent.OnServerEvent:Connect(function(player, clientPrice, skinName)
 
 	if not dataLoaded[player] then
@@ -481,7 +484,7 @@ SkinEvent.OnServerEvent:Connect(function(player, clientPrice, skinName)
 		skinName
 	)
 end)
-
+-- add the skin to the data before the player claims it so he will have it anyways if leaves
 SecretAddSkin.OnServerEvent:Connect(function(player, skinName)
 	if not dataLoaded[player] then
 		return
@@ -509,7 +512,7 @@ end)
 
 
 -- EQUIP SKIN
-
+--event to equip the skins
 EquipSkinEvent.OnServerEvent:Connect(function(player, skinName)
 
 	if not dataLoaded[player] then
@@ -543,7 +546,7 @@ end)
 
 -- GET SKIN DATA
 
-
+--get the player's skin data
 GetSkinData.OnServerInvoke = function(player)
 
 	while not dataLoaded[player] do
@@ -556,7 +559,7 @@ GetSkinData.OnServerInvoke = function(player)
 end
 
 -- GET UPGRADE DATA
-
+--get the playrer upgrades
 GetUpgradeData.OnServerInvoke = function(player)
 
 	while not dataLoaded[player] do
@@ -567,7 +570,7 @@ end
 
 
 -- BUY UPGRADE
-
+--event to buy and save upgrades(connected to buttons)
 BuyUpgradeEvent.OnServerEvent:Connect(function(
 	player,
 	upgradeName,
@@ -701,7 +704,7 @@ BuyUpgradeEvent.OnServerEvent:Connect(function(
 		"Price:", savedUpgrade.Price
 	)
 end)
-
+--once the player can rebirth and presses the rebirth button clear his data except for 2 upgrades and baguettes and skins
 RebirthEvent.OnServerEvent:Connect(function(player)
 	if not dataLoaded[player] then
 		return
@@ -833,7 +836,7 @@ RebirthEvent.OnServerEvent:Connect(function(player)
 		"| Boost:",
 		player:GetAttribute("RebirthBoost")
 	)
-
+--rebirth results
 	for _, upgradeData in
 		ipairs(preservedUpgrades) do
 
@@ -845,6 +848,8 @@ RebirthEvent.OnServerEvent:Connect(function(player)
 		)
 	end
 end)
+
+--testing command to reset my data
 -- RESET DATA COMMAND
 local ADMINS = {
 	[2768492361] = true, 
@@ -890,8 +895,10 @@ TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, erro
 		player:Kick("Your data was reset, but the server transfer failed. Please rejoin.")
 	end
 end)
+--if fail to make the player rejoin kick him
 
 
+--check if the player chats "!reset" and if he's an admin
 Players.PlayerAdded:Connect(function(player)
 	player.Chatted:Connect(function(message)
 		if not ADMINS[player.UserId] then
@@ -939,6 +946,8 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 end)
 
+
+--offline earnings are connected to the first section of the data loading, this is for the calculation
 --OfflineEarnings
 OfflineEarningsEvent.OnServerEvent:Connect(function(player)
 
